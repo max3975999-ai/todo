@@ -132,7 +132,7 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
   function icsTime(ms){
     return new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   }
-  function addToCalendar(t){
+  function downloadIcs(t){
     var lines = [
       "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TodoAssistant//ZH", "BEGIN:VEVENT",
       "UID:" + t.id + "@todo-assistant",
@@ -150,6 +150,22 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
     a.href = url; a.download = "todo-" + t.id + ".ics";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  }
+
+  // 一鍵加入行事曆：Android 直接開啟系統行事曆的新增畫面（已填好標題與時間）
+  function addToCalendar(t){
+    if (!/Android/i.test(navigator.userAgent)){ downloadIcs(t); return; }
+    var end = t.due + 1800000;
+    var gcal = "https://calendar.google.com/calendar/render?action=TEMPLATE" +
+      "&text=" + encodeURIComponent(t.title) +
+      "&dates=" + icsTime(t.due) + "/" + icsTime(end);
+    var intent = "intent:#Intent;action=android.intent.action.INSERT;" +
+      "type=vnd.android.cursor.item/event;" +
+      "S.title=" + encodeURIComponent(t.title) + ";" +
+      "l.beginTime=" + t.due + ";" +
+      "l.endTime=" + end + ";" +
+      "S.browser_fallback_url=" + encodeURIComponent(gcal) + ";end";
+    window.location.href = intent;
   }
 
   function render(){
