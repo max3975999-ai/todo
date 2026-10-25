@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>待辦助理</title>
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--text:#1b1d21;--sub:#6b7280;--line:#e5e7eb;
+  --accent:#3b6cf6;--accent-text:#fff;--danger:#e5484d;--chip:#e8eaef;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#111317;--card:#1c1f26;--text:#eceef2;--sub:#9aa1ae;--line:#2b2f38;
+    --accent:#6b8cff;--accent-text:#0b0d12;--danger:#ff6b70;--chip:#2a2e37;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111317;--card:#1c1f26;--text:#eceef2;--sub:#9aa1ae;--line:#2b2f38;
+  --accent:#6b8cff;--accent-text:#0b0d12;--danger:#ff6b70;--chip:#2a2e37;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  -webkit-text-size-adjust:100%}
+main{max-width:520px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:28px;margin:8px 0 2px}
+.sub{color:var(--sub);font-size:14px;margin-bottom:16px}
+.row{display:flex;gap:8px}
+input[type=text],input[type=datetime-local]{
+  width:100%;font:inherit;font-size:16px;color:var(--text);background:var(--card);
+  border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+button{font:inherit;cursor:pointer;border:0}
+.add{background:var(--accent);color:var(--accent-text);font-weight:600;border-radius:12px;padding:0 18px;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.chip{background:var(--chip);color:var(--text);border-radius:16px;padding:6px 12px;font-size:14px}
+.dt{margin-top:2px}
+.banner{background:var(--accent);color:var(--accent-text);border-radius:12px;padding:12px 14px;margin:0 0 12px;display:none;font-weight:600}
+.perm{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:10px 14px;margin:0 0 12px;font-size:14px;color:var(--sub);display:none}
+.perm button{background:none;color:var(--accent);font-weight:600;padding:0 4px}
+ul{list-style:none;padding:0;margin:16px 0 0}
+li{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.box{width:24px;height:24px;border-radius:50%;border:2px solid var(--sub);background:none;flex:none;padding:0;color:var(--accent-text);font-size:14px;line-height:1}
+li.done .box{background:var(--accent);border-color:var(--accent)}
+.body{flex:1;min-width:0}
+.t{font-size:16px;word-break:break-word}
+li.done .t{text-decoration:line-through;color:var(--sub)}
+.d{font-size:13px;color:var(--sub);margin-top:2px}
+.d.over{color:var(--danger)}
+.del{background:none;color:var(--sub);font-size:18px;padding:4px 6px}
+.empty{text-align:center;color:var(--sub);margin-top:40px}
+</style>
+</head>
+<body>
+<main>
+  <h1>待辦助理</h1>
+  <div class="sub" id="summary"></div>
+
+  <div class="banner" id="banner"></div>
+  <div class="perm" id="perm">開啟通知，時間到時手機會跳出提醒。<button id="permBtn">允許通知</button></div>
+
+  <div class="row">
+    <input type="text" id="title" placeholder="要做什麼？" autocomplete="off" enterkeyhint="done">
+    <button class="add" id="addBtn">新增</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="dt"><input type="datetime-local" id="due" aria-label="提醒時間"></div>
+
+  <ul id="list"></ul>
+  <div class="empty" id="empty">目前沒有待辦事項 ✨</div>
+</main>
+
+<script>
+(function(){
+  var KEY = "todo-assistant-v1";
+  var tasks = [];
+  try { tasks = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { tasks = []; }
+
+  var $ = function(id){ return document.getElementById(id); };
+  function save(){ try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch (e) {} }
+
+  function pad(n){ return n < 10 ? "0" + n : "" + n; }
+  function toInput(d){
+    return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function fmt(ms){
+    return new Date(ms).toLocaleString("zh-TW", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
+  }
+
+  // 快速選時間
+  var quick = [
+    ["1 小時後", function(){ return new Date(Date.now() + 3600000); }],
+    ["今晚 8 點", function(){ var d = new Date(); d.setHours(20,0,0,0); if (d <= new Date()) d.setDate(d.getDate()+1); return d; }],
+    ["明早 9 點", function(){ var d = new Date(); d.setDate(d.getDate()+1); d.setHours(9,0,0,0); return d; }],
+    ["清除", function(){ return null; }]
+  ];
+  quick.forEach(function(q){
+    var b = document.createElement("button");
+    b.className = "chip"; b.textContent = q[0];
+    b.onclick = function(){ var d = q[1](); $("due").value = d ? toInput(d) : ""; };
+    $("chips").appendChild(b);
+  });
+
+  function add(){
+    var text = $("title").value.trim();
+    if (!text) return;
+    var v = $("due").value;
+    var due = v ? new Date(v).getTime() : null;
+    tasks.unshift({ id: Date.now().toString(36), title: text, done: false, due: due, notified: false });
+    $("title").value = ""; $("due").value = "";
+    save(); render();
+  }
+  $("addBtn").onclick = add;
+  $("title").addEventListener("keydown", function(e){ if (e.key === "Enter") add(); });
+
+  function render(){
+    var list = $("list");
+    list.innerHTML = "";
+    var sorted = tasks.slice().sort(function(a,b){
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      if (a.due && b.due) return a.due - b.due;
+      if (a.due) return -1;
+      if (b.due) return 1;
+      return 0;
+    });
+    var now = Date.now();
+    sorted.forEach(function(t){
+      var li = document.createElement("li");
+      if (t.done) li.className = "done";
+
+      var box = document.createElement("button");
+      box.className = "box"; box.setAttribute("aria-label", "切換完成");
+      box.textContent = t.done ? "✓" : "";
+      box.onclick = function(){ t.done = !t.done; save(); render(); };
+
+      var body = document.createElement("div"); body.className = "body";
+      var title = document.createElement("div"); title.className = "t"; title.textContent = t.title;
+      body.appendChild(title);
+      if (t.due){
+        var d = document.createElement("div");
+        var over = !t.done && t.due < now;
+        d.className = "d" + (over ? " over" : "");
+        d.textContent = "⏰ " + fmt(t.due) + (over ? "（已逾時）" : "");
+        body.appendChild(d);
+      }
+
+      var del = document.createElement("button");
+      del.className = "del"; del.setAttribute("aria-label", "刪除"); del.textContent = "✕";
+      del.onclick = function(){ tasks = tasks.filter(function(x){ return x.id !== t.id; }); save(); render(); };
+
+      li.appendChild(box); li.appendChild(body); li.appendChild(del);
+      list.appendChild(li);
+    });
+    var left = tasks.filter(function(t){ return !t.done; }).length;
+    $("summary").textContent = tasks.length ? "還有 " + left + " 項未完成" : "新增你的第一個待辦吧";
+    $("empty").style.display = tasks.length ? "none" : "block";
+  }
+
+  // 提醒：頁面開著時，時間到就跳橫幅（有授權也會發系統通知）
+  function checkReminders(){
+    var now = Date.now(), hit = [];
+    tasks.forEach(function(t){
+      if (!t.done && t.due && !t.notified && t.due <= now){ t.notified = true; hit.push(t); }
+    });
+    if (!hit.length) return;
+    save(); render();
+    var msg = "⏰ 時間到了：" + hit.map(function(t){ return t.title; }).join("、");
+    var b = $("banner"); b.textContent = msg; b.style.display = "block";
+    b.onclick = function(){ b.style.display = "none"; };
+    try {
+      if ("Notification" in window && Notification.permission === "granted"){
+        hit.forEach(function(t){ new Notification("待辦提醒", { body: t.title }); });
+      }
+    } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(200); } catch (e) {}
+  }
+  setInterval(checkReminders, 15000);
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) checkReminders(); });
+
+  // 通知權限
+  try {
+    if ("Notification" in window && Notification.permission === "default"){
+      $("perm").style.display = "block";
+      $("permBtn").onclick = function(){
+        Notification.requestPermission().then(function(){ $("perm").style.display = "none"; });
+      };
+    }
+  } catch (e) {}
+
+  render();
+  checkReminders();
+})();
+</script>
+</body>
+</html>
