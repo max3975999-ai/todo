@@ -160,7 +160,8 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
       "&text=" + encodeURIComponent(t.title) +
       "&dates=" + icsTime(t.due) + "/" + icsTime(end);
     var intent = "intent:#Intent;action=android.intent.action.INSERT;" +
-      "type=vnd.android.cursor.item/event;" +
+      "package=com.google.android.calendar;" +
+      "type=vnd.android.cursor.dir/event;" +
       "S.title=" + encodeURIComponent(t.title) + ";" +
       "l.beginTime=" + t.due + ";" +
       "l.endTime=" + end + ";" +
