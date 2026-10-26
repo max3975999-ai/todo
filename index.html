@@ -43,6 +43,9 @@ input[type=text],input[type=datetime-local]{
   border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
 button{font:inherit;cursor:pointer;border:0}
 .add{background:var(--accent);color:var(--accent-text);font-weight:600;border-radius:12px;padding:0 18px;white-space:nowrap}
+.mic{background:var(--chip);color:var(--text);border-radius:12px;padding:0 14px;font-size:20px}
+.mic.rec{background:var(--danger);color:#fff}
+.hint{font-size:13px;color:var(--sub);margin:8px 2px 0;min-height:1em}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
 .chip{background:var(--chip);color:var(--text);border-radius:16px;padding:6px 12px;font-size:14px}
 .dt{margin-top:2px}
@@ -73,8 +76,10 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
 
   <div class="row">
     <input type="text" id="title" placeholder="要做什麼？" autocomplete="off" enterkeyhint="done">
+    <button class="mic" id="micBtn" aria-label="語音輸入">🎤</button>
     <button class="add" id="addBtn">新增</button>
   </div>
+  <div class="hint" id="hint"></div>
   <div class="chips" id="chips"></div>
   <div class="dt"><input type="datetime-local" id="due" aria-label="提醒時間"></div>
 
@@ -113,13 +118,171 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
     $("chips").appendChild(b);
   });
 
+  // ===== 口語時間解析：「明天下午三點開會」→ 標題＋時間 =====
+  var CNUM = {"零":0,"〇":0,"一":1,"二":2,"兩":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9};
+  function toNum(x){
+    if (/^[0-9]+$/.test(x)) return parseInt(x, 10);
+    if (x.indexOf("十") >= 0){
+      var p = x.split("十");
+      return (p[0] ? CNUM[p[0]] : 1) * 10 + (p[1] ? CNUM[p[1]] : 0);
+    }
+    var t = 0;
+    for (var i = 0; i < x.length; i++) t = t * 10 + (CNUM[x.charAt(i)] || 0);
+    return t;
+  }
+  function parseCN(text){
+    var s = text.replace(/\s+(?=[\u4e00-\u9fff0-9:])|(?<=[\u4e00-\u9fff0-9:])\s+/g, "");
+    var N = "(?:[0-9]{1,2}|[零〇一二兩三四五六七八九十]{1,3})";
+    var now = new Date(), m;
+    var day = null, weakDay = false, rollWeek = false;
+    var hour = null, min = 0, period = null, rel = null;
+    function cut(re){ var r = s.match(re); if (r) s = s.replace(r[0], ""); return r; }
+    function dayOffset(n){
+      var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      d.setDate(d.getDate() + n);
+      return d;
+    }
+
+    // 幾小時／幾分鐘後
+    if (cut(/半個?小時(?:後|之後)/)) rel = 1800000;
+    else if ((m = cut(new RegExp("(" + N + ")個?小時(?:後|之後)")))) rel = toNum(m[1]) * 3600000;
+    else if ((m = cut(new RegExp("(" + N + ")分鐘?(?:後|之後)")))) rel = toNum(m[1]) * 60000;
+
+    if (rel === null){
+      // 日期
+      if ((m = cut(new RegExp("(" + N + ")天(?:後|之後)")))) day = dayOffset(toNum(m[1]));
+      else if (cut(/大後天/)) day = dayOffset(3);
+      else if (cut(/後天/)) day = dayOffset(2);
+      else if ((m = cut(/明[天日早晨晚]/))){
+        day = dayOffset(1);
+        if (/[早晨]/.test(m[0])) period = "早上";
+        if (/晚/.test(m[0])) period = "晚上";
+      }
+      else if ((m = cut(/今[天日早晨晚]/))){
+        day = dayOffset(0);
+        if (/[早晨]/.test(m[0])) period = "早上";
+        if (/晚/.test(m[0])) period = "晚上";
+      }
+      else if ((m = cut(/([這本下])?(?:週|周|星期|禮拜)([一二三四五六日天])/))){
+        var wd = "日一二三四五六".indexOf(m[2] === "天" ? "日" : m[2]);
+        var cur = now.getDay();
+        if (m[1] === "下"){
+          day = dayOffset(-((cur + 6) % 7) + 7 + ((wd + 6) % 7));
+        } else {
+          var diff = (wd - cur + 7) % 7;
+          day = dayOffset(diff);
+          if (diff === 0) rollWeek = true;
+        }
+      }
+      else if ((m = cut(new RegExp("(" + N + ")月(" + N + ")[日號]")))){
+        var y = now.getFullYear(), d1 = new Date(y, toNum(m[1]) - 1, toNum(m[2]));
+        if (d1.getTime() < dayOffset(0).getTime()) d1.setFullYear(y + 1);
+        day = d1;
+      }
+      else if ((m = cut(new RegExp("(" + N + ")[日號]")))){
+        var d2 = new Date(now.getFullYear(), now.getMonth(), toNum(m[1]));
+        if (d2.getTime() < dayOffset(0).getTime()) d2.setMonth(d2.getMonth() + 1);
+        day = d2; weakDay = true;
+      }
+
+      // 時段與幾點
+      if ((m = cut(/凌晨|半夜|清晨|早上|早晨|上午|中午|下午|傍晚|晚上|晚間|夜裡|夜晚/))) period = m[0];
+      if ((m = cut(/([0-9]{1,2}):([0-9]{2})/))){
+        hour = parseInt(m[1], 10); min = parseInt(m[2], 10);
+      } else if ((m = cut(new RegExp("(" + N + ")[點時](?:(半)|整|(" + N + ")分?)?")))){
+        hour = toNum(m[1]);
+        if (m[2]) min = 30; else if (m[3]) min = toNum(m[3]);
+      }
+      if (hour !== null && period){
+        if (/下午|傍晚|晚上|晚間|夜裡|夜晚/.test(period)){ if (hour < 12) hour += 12; }
+        else if (/中午/.test(period)){ if (hour < 6) hour += 12; }
+        else if (hour === 12) hour = 0;
+      }
+      if (hour === null && period){
+        hour = /中午/.test(period) ? 12 : /下午/.test(period) ? 15 : /傍晚/.test(period) ? 18 :
+               /晚/.test(period) || /夜/.test(period) ? 20 : /凌晨|半夜/.test(period) ? 3 : 9;
+      }
+    }
+
+    var found = rel !== null || hour !== null || (day !== null && !weakDay);
+    if (!found) return { found: false, title: text };
+
+    var due;
+    if (rel !== null){
+      due = new Date(now.getTime() + rel);
+    } else {
+      var base = day || dayOffset(0);
+      var hh = hour !== null ? hour : 9;
+      due = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, min, 0, 0);
+      if (due.getTime() <= now.getTime()){
+        if (day === null){
+          if (!period && hh >= 1 && hh <= 11){
+            var pm = new Date(due.getTime()); pm.setHours(hh + 12);
+            if (pm.getTime() > now.getTime()) due = pm;
+          }
+          if (due.getTime() <= now.getTime()) due.setDate(due.getDate() + 1);
+        } else if (rollWeek){
+          due.setDate(due.getDate() + 7);
+        }
+      }
+    }
+
+    var title = s.replace(/^[，,。、；;\s]+|[，,。、；;\s]+$/g, "")
+                 .replace(/^(?:請|麻煩)?(?:提醒我|叫我|記得|幫我|提醒)(?:要|去)?/, "")
+                 .replace(/^[的，,。、\s]+/, "");
+    if (!title) title = text;
+    return { found: true, title: title, due: due.getTime() };
+  }
+
+  // ===== 語音輸入 =====
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var rec = null, listening = false;
+  function setHint(t){ $("hint").textContent = t || ""; }
+  function applySpoken(said){
+    var r = parseCN(said);
+    $("title").value = r.title;
+    if (r.found){
+      $("due").value = toInput(new Date(r.due));
+      setHint("聽到：「" + said + "」→ ⏰ " + fmt(r.due) + "。確認後按「新增」");
+    } else {
+      setHint("聽到：「" + said + "」，沒有偵測到時間，可點下面的快速時間。");
+    }
+  }
+  $("micBtn").onclick = function(){
+    if (!SR){ setHint("這個瀏覽器不支援語音輸入，可改用鍵盤上的麥克風。"); return; }
+    if (listening && rec){ rec.stop(); return; }
+    rec = new SR();
+    rec.lang = "zh-TW"; rec.interimResults = false; rec.maxAlternatives = 1; rec.continuous = false;
+    rec.onstart = function(){
+      listening = true; $("micBtn").classList.add("rec");
+      setHint("請說話，例如「明天下午三點開會」");
+    };
+    rec.onend = function(){ listening = false; $("micBtn").classList.remove("rec"); };
+    rec.onerror = function(e){
+      var msg = {
+        "not-allowed": "請允許麥克風權限後再試一次。",
+        "service-not-allowed": "請允許麥克風權限後再試一次。",
+        "no-speech": "沒有聽到聲音，再按一次麥克風試試。",
+        "network": "語音辨識需要網路連線。",
+        "audio-capture": "找不到麥克風。"
+      }[e.error];
+      setHint(msg || "語音輸入失敗，請再試一次。");
+    };
+    rec.onresult = function(e){ applySpoken(e.results[0][0].transcript); };
+    try { rec.start(); } catch (err) { setHint("無法啟動語音輸入。"); }
+  };
+
   function add(){
     var text = $("title").value.trim();
     if (!text) return;
     var v = $("due").value;
     var due = v ? new Date(v).getTime() : null;
+    if (due === null){
+      var r = parseCN(text);
+      if (r.found){ text = r.title; due = r.due; }
+    }
     tasks.unshift({ id: Date.now().toString(36), title: text, done: false, due: due, notified: false });
-    $("title").value = ""; $("due").value = "";
+    $("title").value = ""; $("due").value = ""; $("hint").textContent = "";
     save(); render();
   }
   $("addBtn").onclick = add;
