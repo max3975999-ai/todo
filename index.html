@@ -227,10 +227,10 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
       }
     }
 
-    var title = s.replace(/^[，,。、；;\s]+|[，,。、；;\s]+$/g, "")
-                 .replace(/^(?:請|麻煩)?(?:提醒我|叫我|記得|幫我|提醒)(?:要|去)?/, "")
-                 .replace(/^[的，,。、\s]+/, "");
-    if (!title) title = text;
+    var title = s.replace(/^[，,。、；;\s]+|[，,。、；;\s]+$/g, "");
+    var stripped = title.replace(/^(?:請|麻煩)?(?:提醒我|叫我|記得|幫我|提醒)(?:要|去)?/, "")
+                        .replace(/^[的，,。、\s]+/, "");
+    title = stripped || title || "待辦事項";
     return { found: true, title: title, due: due.getTime() };
   }
 
@@ -327,7 +327,6 @@ li.done .t{text-decoration:line-through;color:var(--sub)}
       "type=vnd.android.cursor.dir/event;" +
       "S.title=" + encodeURIComponent(t.title) + ";" +
       "l.beginTime=" + t.due + ";" +
-      "l.endTime=" + end + ";" +
       "S.browser_fallback_url=" + encodeURIComponent(gcal) + ";end";
     window.location.href = intent;
   }
